@@ -132,18 +132,20 @@ For each tool, describe the specific failure mode you're handling and what the a
 
 ## A Complete Interaction (Step by Step)
 
+FitFindr is a thrift-shopping assistant that helps users find secondhand clothing and style it with what they already own. When a user describes what they want, the agent calls `search_listings` to find matching items from the mock dataset; once a candidate item is chosen, it calls `suggest_outfit` to pair it with the user's wardrobe (or give general styling advice if the wardrobe is empty); finally it calls `create_fit_card` to generate a shareable caption. If any tool fails or returns nothing — no search results, an empty wardrobe, or a missing outfit string — the agent surfaces a friendly fallback message rather than crashing or going silent.
+
 Write out what a full user interaction looks like from start to finish — tool call by tool call. Use a specific example query.
 
 **Example user query:** "I'm looking for a vintage graphic tee under $30. I mostly wear baggy jeans and chunky sneakers. What's out there and how would I style it?"
 
 **Step 1:**
-<!-- What does the agent do first? Which tool is called? With what input? -->
+The agent parses the query and calls `search_listings(description="vintage graphic tee", max_price=30.0)`. The tool loads all listings, drops anything over $30, scores each remaining item for keyword overlap with "vintage graphic tee", and returns a sorted list. Top matches include *Graphic Tee — 2003 Tour Bootleg Style* ($24, depop) and *Y2K Baby Tee — Butterfly Print* ($18, depop). If nothing matched, the agent would tell the user no listings were found and suggest loosening the price or description.
 
 **Step 2:**
-<!-- What happens next? What was returned from step 1? What tool is called now? -->
+The agent picks the top result (the bootleg-style graphic tee at $24) and calls `suggest_outfit(new_item=<that listing dict>, wardrobe=<user's wardrobe>)`. The user mentioned baggy jeans and chunky sneakers, so the wardrobe contains items like "Baggy straight-leg jeans, dark wash" and "Chunky white sneakers." The LLM returns two specific outfit combinations that name those pieces — e.g., "Wear the bootleg tee tucked into your baggy dark-wash jeans with your chunky white sneakers for an easy vintage streetwear look." If the wardrobe had been empty, the tool would instead return general styling advice about silhouette and color palette.
 
 **Step 3:**
-<!-- Continue until the full interaction is complete -->
+The agent calls `create_fit_card(outfit=<suggestion from Step 2>, new_item=<listing dict>)`. The LLM produces a 2–4 sentence Instagram/TikTok-style caption that naturally mentions the item name, $24 price, and depop platform. If the outfit string were empty or whitespace-only, the tool returns a fixed error string instead of calling the LLM.
 
 **Final output to user:**
-<!-- What does the user actually see at the end? -->
+The user sees: (1) a list of matching thrift listings with title, price, condition, and platform; (2) two styled outfit ideas that call out specific pieces from their wardrobe; and (3) a ready-to-post fit-card caption they can copy straight to social media.

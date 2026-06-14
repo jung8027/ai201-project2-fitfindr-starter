@@ -18,6 +18,8 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
+import re
+
 from tools import search_listings, suggest_outfit, create_fit_card
 
 
@@ -46,6 +48,32 @@ def _new_session(query: str, wardrobe: dict) -> dict:
 
 
 # ── planning loop ─────────────────────────────────────────────────────────────
+
+def _parse_query(query: str) -> dict:
+    text = query.lower().strip()
+    size = None
+    match = re.search(r"\bsize\s*([a-z0-9/\-]+)\b", text)
+    if match:
+        size = match.group(1).upper()
+    else:
+        match = re.search(r"\bsz\s*([a-z0-9/\-]+)\b", text)
+        if match:
+            size = match.group(1).upper()
+
+    max_price = None
+    match = re.search(r"under\s*\$?\s*(\d+(?:\.\d+)?)", text)
+    if match:
+        max_price = float(match.group(1))
+
+    description = text
+    for pattern in [r"\bsize\s*[a-z0-9/\-]+\b", r"\bsz\s*[a-z0-9/\-]+\b", r"\bunder\s*\$?\s*\d+(?:\.\d+)?\b"]:
+        description = re.sub(pattern, "", description)
+    description = re.sub(r"\s+", " ", description).strip()
+    if not description:
+        description = "thrifted clothing"
+
+    return {"description": description, "size": size, "max_price": max_price}
+
 
 def run_agent(query: str, wardrobe: dict) -> dict:
     """
@@ -92,9 +120,23 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+    session["parsed"] = _parse_query(query)
+
+    results = search_listings(
+        description=session["parsed"]["description"],
+        size=session["parsed"]["size"],
+        max_price=session["parsed"]["max_price"],
+    )
+    session["search_results"] = results
+
+    if not results:
+        session["error"] = "No listings matched your search. Try a broader description or a higher price limit."
+        return session
+
+    session["selected_item"] = results[0]
+    session["outfit_suggestion"] = suggest_outfit(session["selected_item"], wardrobe)
+    session["fit_card"] = create_fit_card(session["outfit_suggestion"], session["selected_item"])
     return session
 
 

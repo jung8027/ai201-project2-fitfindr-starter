@@ -13,6 +13,7 @@ Tools:
 """
 
 import os
+import re
 
 from dotenv import load_dotenv
 from groq import Groq
@@ -28,10 +29,77 @@ def _get_groq_client():
     """Initialize and return a Groq client using GROQ_API_KEY from .env."""
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        raise ValueError(
-            "GROQ_API_KEY not set. Add it to a .env file in the project root."
-        )
+        raise ValueError("GROQ_API_KEY not set. Add it to a .env file in the project root.")
     return Groq(api_key=api_key)
+
+
+def _normalize_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _size_matches(listing_size: str | None, requested_size: str | None) -> bool:
+    if not requested_size or not listing_size:
+        return True
+    requested = _normalize_text(requested_size)
+    listing = _normalize_text(str(listing_size))
+    if requested in listing:
+        return True
+    return any(token in listing for token in requested.split())
+
+
+def _score_listing(description: str, listing: dict) -> int:
+    query_tokens = set(_normalize_text(description).split())
+    if not query_tokens:
+        return 0
+
+    haystacks = [
+        listing.get("title", ""),
+        listing.get("description", ""),
+        " ".join(listing.get("style_tags", []) or []),
+        listing.get("category", ""),
+        " ".join(listing.get("colors", []) or []),
+        listing.get("brand") or "",
+    ]
+    haystack_text = " ".join(haystacks).lower()
+    score = 0
+    for token in query_tokens:
+        if token in haystack_text:
+            score += 1
+    return score
+
+
+def _fallback_outfit_text(new_item: dict) -> str:
+    title = new_item.get("title", "this thrifted piece")
+    price = new_item.get("price", "")
+    category = new_item.get("category", "item")
+    return (
+        f"Try pairing {title} with relaxed basics in a similar color story. "
+        f"For a balanced look, style it with neutral layers and one statement accessory. "
+        f"If you want an easy thrifted outfit, keep the vibe casual and confident."
+    )
+
+
+def _fallback_fit_card(new_item: dict) -> str:
+    title = new_item.get("title", "this thrifted find")
+    price = new_item.get("price", "")
+    platform = new_item.get("platform", "thrift shop")
+    return (
+        f"Found {title} for ${price:.2f} on {platform}. "
+        f"It has that easy, lived-in thrift vibe and is perfect for a casual outfit refresh."
+    )
+
+
+def _llm_text(prompt: str, temperature: float = 0.8) -> str:
+    try:
+        client = _get_groq_client()
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception:
+        return ""
 
 
 # ── Tool 1: search_listings ───────────────────────────────────────────────────
@@ -69,8 +137,14 @@ def search_listings(
 
     Before writing code, fill in the Tool 1 section of planning.md.
     """
-    # Replace this with your implementation
-    return []
+    listings = load_listings()
+    filtered = [item for item in listings if max_price is None or item.get("price", float("inf")) <= max_price]
+    filtered = [item for item in filtered if _size_matches(item.get("size"), size)]
+
+    scored = [(item, _score_listing(description, item)) for item in filtered]
+    scored = [(item, score) for item, score in scored if score > 0]
+    scored.sort(key=lambda entry: (-entry[1], entry[0].get("price", 0)))
+    return [item for item, _ in scored]
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
@@ -100,8 +174,25 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
 
     Before writing code, fill in the Tool 2 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    wardrobe_items = wardrobe.get("items", []) if isinstance(wardrobe, dict) else []
+    if not wardrobe_items:
+        prompt = (
+            "You are a fashion stylist. Give 2 casual styling ideas for this thrifted item. "
+            "Focus on silhouette, color palette, vibe, and what basics to pair with it.\n\n"
+            f"Item: {new_item}"
+        )
+        result = _llm_text(prompt, temperature=0.7)
+        return result or _fallback_outfit_text(new_item)
+
+    prompt = (
+        "You are a fashion stylist. Suggest 2 complete outfits using the thrifted item "
+        "and the user's wardrobe. Mention specific wardrobe pieces by name.\n\n"
+        f"Thrifted item: {new_item}\n\n"
+        f"Wardrobe: {wardrobe_items}\n\n"
+        "Return 2 short bullet points."
+    )
+    result = _llm_text(prompt, temperature=0.7)
+    return result or _fallback_outfit_text(new_item)
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
@@ -133,5 +224,15 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
 
     Before writing code, fill in the Tool 3 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    if not outfit or not str(outfit).strip():
+        return "Outfit details are missing, so I can’t generate a fit card yet."
+
+    prompt = (
+        "Write a short, shareable Instagram/TikTok caption for this thrifted outfit. "
+        "Make it sound casual and authentic, mention the item name, price, and platform once each, "
+        "and keep it to 2–4 sentences.\n\n"
+        f"Item details: {new_item}\n\n"
+        f"Outfit notes: {outfit}"
+    )
+    result = _llm_text(prompt, temperature=0.9)
+    return result or _fallback_fit_card(new_item)

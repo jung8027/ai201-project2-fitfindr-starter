@@ -43,8 +43,25 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
            string and return it along with session["outfit_suggestion"] and
            session["fit_card"].
     """
-    # TODO: implement this function
-    return "Agent not yet implemented.", "", ""
+    if not user_query or not str(user_query).strip():
+        return "Please enter a clothing query first.", "", ""
+
+    wardrobe = get_example_wardrobe() if wardrobe_choice == "Example wardrobe" else get_empty_wardrobe()
+    session = run_agent(user_query, wardrobe)
+
+    if session.get("error"):
+        return session["error"], "", ""
+
+    item = session.get("selected_item") or {}
+    listing_text = (
+        f"Title: {item.get('title', 'Unknown item')}\n"
+        f"Price: ${item.get('price', 0):.2f}\n"
+        f"Size: {item.get('size', 'N/A')}\n"
+        f"Platform: {item.get('platform', 'N/A')}\n"
+        f"Description: {item.get('description', 'No description available.')}"
+    )
+
+    return listing_text, session.get("outfit_suggestion", ""), session.get("fit_card", "")
 
 
 # ── interface ─────────────────────────────────────────────────────────────────
