@@ -93,7 +93,7 @@ def _llm_text(prompt: str, temperature: float = 0.8) -> str:
     try:
         client = _get_groq_client()
         response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=temperature,
         )
